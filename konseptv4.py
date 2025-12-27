@@ -15,6 +15,7 @@ try:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image as RLImage
     from reportlab.lib import colors
+    from reportlab.graphics.shapes import Drawing, Line, Rect, Ellipse, Polygon
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
@@ -84,7 +85,6 @@ class DrawingCanvas(tk.Canvas):
             self.last_y = event.y
             
         elif self.tool == "eraser":
-            # Silgi - beyaz çizgi çiz
             self.create_oval(event.x-10, event.y-10, event.x+10, event.y+10,
                            fill="white", outline="white", tags="drawing")
             
@@ -92,7 +92,6 @@ class DrawingCanvas(tk.Canvas):
             if self.temp_item:
                 self.delete(self.temp_item)
             
-            # Koordinatları düzelt
             x0 = min(self.last_x, event.x)
             y0 = min(self.last_y, event.y)
             x1 = max(self.last_x, event.x)
@@ -119,7 +118,6 @@ class DrawingCanvas(tk.Canvas):
             if self.temp_item:
                 self.delete(self.temp_item)
             
-            # Koordinatları düzelt
             x0 = min(self.last_x, event.x)
             y0 = min(self.last_y, event.y)
             x1 = max(self.last_x, event.x)
@@ -234,6 +232,7 @@ class NoteEditor(tk.Toplevel):
             
             dump = content.get("dump", None)
             if dump:
+                # Dump'tan yükle
                 for item in dump:
                     key = item[0]
                     val = item[1]
@@ -283,16 +282,19 @@ class NoteEditor(tk.Toplevel):
                                     cell.insert(0, table_content[r][c])
                                     row_cells.append(cell)
                                 cells.append(row_cells)
-                            self.tables_data[obj_id] = table_content  # Content only, widgets not saved
+                            # Update tables_data with widgets
+                            self.tables_data[obj_id] = table_content  # Content only
                             self.text_area.window_create(idx, window=table_frame, align=tk.BASELINE)
                             widget_path = str(table_frame)
                             self.widget_to_obj[widget_path] = ('table', obj_id)
             else:
+                # Eski şekilde
                 text = content.get("text", "")
                 if text:
                     self.text_area.insert("1.0", text)
                 self.recreate_embedded_objects()
             
+            # Çizimleri yükle
             drawings = content.get("drawings", [])
             self.drawing_canvas.load_drawings(drawings)
             
@@ -305,78 +307,72 @@ class NoteEditor(tk.Toplevel):
         self.update_status_lazy()
         
     def recreate_embedded_objects(self):
-        for img_data in self.images_data:
-            try:
-                img_bytes = base64.b64decode(img_data["base64"])
-                img = Image.open(io.BytesIO(img_bytes))
-                img.thumbnail((img_data["width"], img_data["height"]), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
-                
-                label = tk.Label(self.text_area, image=photo, bg="white", relief=tk.FLAT, bd=0)
-                label.image = photo
-                
-                self.text_area.insert(tk.END, "\n")
-                self.text_area.window_create(tk.END, window=label, align=tk.CENTER)
-                self.text_area.insert(tk.END, "\n")
-                
-                widget_path = str(label)
-                self.widget_to_obj[widget_path] = ('image', len(self.images_data) - 1)
-            except Exception as e:
-                print(f"Görsel yeniden oluşturma hatası: {e}")
-        
-        for table_content in self.tables_data:
-            if isinstance(table_content, list) and table_content:
-                rows = len(table_content)
-                cols = len(table_content[0]) if table_content[0] else 0
-                if rows > 0 and cols > 0:
-                    table_frame = tk.Frame(self.text_area, bg="#ccc", relief=tk.FLAT, bd=0)
+        """Yüklenen verilerden embedded widget'ları yeniden oluştur"""
+        try:
+            # Görselleri sonuna ekle (konum kaydedilmediğinden)
+            for img_data in self.images_data:
+                try:
+                    img_bytes = base64.b64decode(img_data["base64"])
+                    img = Image.open(io.BytesIO(img_bytes))
+                    img.thumbnail((img_data["width"], img_data["height"]), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
                     
-                    cells = []
-                    for r in range(rows):
-                        row_cells = []
-                        for c in range(cols):
-                            cell = tk.Entry(table_frame, width=15, relief="solid", bd=1, 
-                                          font=("Calibri", 10), justify=tk.LEFT)
-                            cell.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
-                            try:
+                    label = tk.Label(self.text_area, image=photo, bg="white", relief=tk.FLAT, bd=0)
+                    label.image = photo
+                    
+                    self.text_area.insert(tk.END, "\n")
+                    self.text_area.window_create(tk.END, window=label, align=tk.CENTER)
+                    self.text_area.insert(tk.END, "\n")
+                except Exception as e:
+                    print(f"Görsel yeniden oluşturma hatası: {e}")
+            
+            # Tabloları sonuna ekle
+            for table_content in self.tables_data:
+                if isinstance(table_content, list) and table_content:
+                    rows = len(table_content)
+                    cols = len(table_content[0]) if rows > 0 else 0
+                    if rows > 0 and cols > 0:
+                        table_frame = tk.Frame(self.text_area, bg="#ccc", relief=tk.FLAT, bd=0)
+                        
+                        cells = []
+                        for r in range(rows):
+                            row_cells = []
+                            for c in range(cols):
+                                cell = tk.Entry(table_frame, width=15, relief="solid", bd=1, 
+                                              font=("Calibri", 10), justify=tk.LEFT)
+                                cell.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
                                 cell.insert(0, table_content[r][c])
-                            except:
-                                pass
-                            row_cells.append(cell)
-                        cells.append(row_cells)
+                                row_cells.append(cell)
+                            cells.append(row_cells)
+                        
+                        self.tables_data.append(table_content)
+                        
+                        self.text_area.insert(tk.END, "\n")
+                        self.text_area.window_create(tk.END, window=table_frame, align=tk.BASELINE)
+                        self.text_area.insert(tk.END, "\n")
+            
+            # Şekilleri sonuna ekle
+            for shape_data in self.shapes_data:
+                try:
+                    shape_type = shape_data["type"]
+                    shape_name = shape_data["name"]
+                    width = shape_data["width"]
+                    height = shape_data["height"]
+                    color = shape_data["color"]
                     
-                    table_id = len(self.tables_data) - 1
-                    self.tables_data[table_id] = table_content
+                    shape_canvas = tk.Canvas(self.text_area, width=width, height=height,
+                                            bg="white", relief=tk.FLAT, bd=0, highlightthickness=0)
+                    
+                    cx, cy = width // 2, height // 2
+                    self._draw_shape_on_canvas(shape_canvas, shape_type, cx, cy, width-20, height-20, color)
                     
                     self.text_area.insert(tk.END, "\n")
-                    self.text_area.window_create(tk.END, window=table_frame, align=tk.BASELINE)
+                    self.text_area.window_create(tk.END, window=shape_canvas, align=tk.CENTER)
                     self.text_area.insert(tk.END, "\n")
-                    
-                    widget_path = str(table_frame)
-                    self.widget_to_obj[widget_path] = ('table', table_id)
-        
-        for shape_data in self.shapes_data:
-            try:
-                shape_type = shape_data["type"]
-                shape_name = shape_data["name"]
-                width = shape_data["width"]
-                height = shape_data["height"]
-                color = shape_data["color"]
-                
-                shape_canvas = tk.Canvas(self.text_area, width=width, height=height,
-                                        bg="white", relief=tk.FLAT, bd=0, highlightthickness=0)
-                
-                cx, cy = width // 2, height // 2
-                self._draw_shape_on_canvas(shape_canvas, shape_type, cx, cy, width-20, height-20, color)
-                
-                self.text_area.insert(tk.END, "\n")
-                self.text_area.window_create(tk.END, window=shape_canvas, align=tk.CENTER)
-                self.text_area.insert(tk.END, "\n")
-                
-                widget_path = str(shape_canvas)
-                self.widget_to_obj[widget_path] = ('shape', len(self.shapes_data) - 1)
-            except Exception as e:
-                print(f"Şekil yeniden oluşturma hatası: {e}")
+                except Exception as e:
+                    print(f"Şekil yeniden oluşturma hatası: {e}")
+        except Exception as e:
+            print(f"Embedded objects yeniden oluşturma hatası: {e}")
         
     def center_window(self):
         self.update_idletasks()
@@ -396,6 +392,7 @@ class NoteEditor(tk.Toplevel):
         menubar = tk.Menu(self, bg=THEME["toolbar_bg"], fg="white")
         self.config(menu=menubar)
         
+        # Dosya
         file_menu = tk.Menu(menubar, tearoff=0, bg=THEME["toolbar_bg"], fg="white")
         menubar.add_cascade(label="Dosya", menu=file_menu)
         file_menu.add_command(label="Kaydet", command=self.save_note, accelerator="Ctrl+S")
@@ -403,6 +400,7 @@ class NoteEditor(tk.Toplevel):
         file_menu.add_separator()
         file_menu.add_command(label="Kapat", command=self.close_editor)
         
+        # Ekle
         insert_menu = tk.Menu(menubar, tearoff=0, bg=THEME["toolbar_bg"], fg="white")
         menubar.add_cascade(label="Ekle", menu=insert_menu)
         insert_menu.add_command(label="📷 Görsel Ekle...", command=self.insert_image)
@@ -410,11 +408,13 @@ class NoteEditor(tk.Toplevel):
         insert_menu.add_command(label="▦ Tablo Ekle...", command=self.insert_table_dialog)
         insert_menu.add_command(label="📐 Şekil Galerisi...", command=self.open_shape_gallery)
         
+        # Çizim
         draw_menu = tk.Menu(menubar, tearoff=0, bg=THEME["toolbar_bg"], fg="white")
         menubar.add_cascade(label="Çizim", menu=draw_menu)
         draw_menu.add_command(label="🎨 Çizim Modunu Aç/Kapat", command=self.toggle_drawing_mode)
         draw_menu.add_command(label="🗑️ Çizimleri Temizle", command=self.clear_all_drawings)
         
+        # Ok
         arrow_menu = tk.Menu(menubar, tearoff=0, bg=THEME["toolbar_bg"], fg="white")
         menubar.add_cascade(label="Ok", menu=arrow_menu)
         for text, symbol in [("Sağa", "→"), ("Sola", "←"), ("Yukarı", "↑"), 
@@ -426,6 +426,7 @@ class NoteEditor(tk.Toplevel):
         toolbar = tk.Frame(self, bg=THEME["toolbar_bg"], relief=tk.RAISED, bd=1)
         toolbar.grid(row=0, column=0, sticky="ew")
         
+        # Row 1: Dosya ve Medya Araçları
         row1 = tk.Frame(toolbar, bg=THEME["toolbar_bg"])
         row1.pack(fill=tk.X, padx=5, pady=2)
         
@@ -434,6 +435,7 @@ class NoteEditor(tk.Toplevel):
         
         tk.Frame(row1, width=20, bg=THEME["toolbar_bg"]).pack(side=tk.LEFT)
         
+        # Görsel butonu
         self._add_btn(row1, "📷 Görsel", self.insert_image, width=10)
         
         tk.Frame(row1, width=10, bg=THEME["toolbar_bg"]).pack(side=tk.LEFT)
@@ -443,9 +445,11 @@ class NoteEditor(tk.Toplevel):
         
         tk.Frame(row1, width=10, bg=THEME["toolbar_bg"]).pack(side=tk.LEFT)
         
+        # Ok butonları
         for symbol in ["→", "←", "↑", "↓", "⇒"]:
             self._add_btn(row1, symbol, lambda s=symbol: self.insert_text(s), width=3)
         
+        # Row 2: Formatlama ve Çizim
         row2 = tk.Frame(toolbar, bg=THEME["toolbar_bg"])
         row2.pack(fill=tk.X, padx=5, pady=2)
         
@@ -473,6 +477,7 @@ class NoteEditor(tk.Toplevel):
         
         tk.Frame(row2, width=10, bg=THEME["toolbar_bg"]).pack(side=tk.LEFT)
         
+        # Yazı rengi
         tk.Label(row2, text="Renk:", bg=THEME["toolbar_bg"], fg="white").pack(side=tk.LEFT, padx=5)
         self.text_color_btn = tk.Button(row2, text="  A  ", width=3,
                                        bg=self.text_color, fg="white",
@@ -487,12 +492,14 @@ class NoteEditor(tk.Toplevel):
         
         tk.Frame(row2, width=20, bg=THEME["toolbar_bg"]).pack(side=tk.LEFT)
         
+        # Çizim kontrolleri
         self.drawing_mode_btn = tk.Button(row2, text="🎨 Çizim: KAPALI", 
                                          command=self.toggle_drawing_mode,
                                          bg=THEME["btn_bg"], fg="white", width=15,
                                          cursor="hand2")
         self.drawing_mode_btn.pack(side=tk.LEFT, padx=5)
         
+        # Row 3: Çizim Araçları (başlangıçta gizli)
         self.draw_toolbar = tk.Frame(toolbar, bg=THEME["toolbar_bg"])
         
         tk.Label(self.draw_toolbar, text="Araç:", bg=THEME["toolbar_bg"], 
@@ -559,19 +566,25 @@ class NoteEditor(tk.Toplevel):
         a4_frame.grid_rowconfigure(0, weight=1)
         a4_frame.grid_columnconfigure(0, weight=1)
         
+        # Text area
         self.text_area = tk.Text(a4_frame, wrap=tk.WORD, undo=True, 
                                 font=("Calibri", 11), bg="white", fg="black",
                                 padx=60, pady=40, relief=tk.FLAT,
                                 insertbackground="black")
         self.text_area.grid(row=0, column=0, sticky="nsew")
         
+        # Scrollbar
         scrollbar = tk.Scrollbar(a4_frame, orient=tk.VERTICAL, command=self.text_area.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text_area.config(yscrollcommand=scrollbar.set)
         
+        # Çizim canvası - Frame içinde overlay olarak
         self.drawing_frame = tk.Frame(a4_frame, bg="white")
         self.drawing_canvas = DrawingCanvas(self.drawing_frame)
         self.drawing_canvas.pack(fill=tk.BOTH, expand=True)
+        
+        # Başlangıçta gizli
+        # Çizim modu açıldığında place ile göstereceğiz
 
     def _create_status_bar(self):
         status_frame = tk.Frame(self, bg=THEME["toolbar_bg"])
@@ -592,38 +605,45 @@ class NoteEditor(tk.Toplevel):
         self.text_area.bind("<KeyRelease>", self.on_key_release)
         self.text_area.bind("<<Modified>>", self.on_modified)
 
+    # === ÇİZİM MOD KONTROLÜ ===
     def toggle_drawing_mode(self):
+        """Çizim modunu aç/kapat"""
         self.drawing_mode = not self.drawing_mode
         
         if self.drawing_mode:
+            # Çizim modu AÇIK
             try:
                 self.drawing_mode_btn.config(text="🎨 Çizim: AÇIK", bg="#00aa00")
                 self.draw_toolbar.pack(fill=tk.X, padx=5, pady=2)
                 self.drawing_canvas.toggle_drawing(True)
                 
+                # Çizim frame'ini text area üzerine yerleştir
                 self.drawing_frame.place(x=0, y=0, relwidth=1, relheight=1)
                 
-                self.text_area.config(state=tk.DISABLED)
+                self.text_area.config(state=tk.DISABLED)  # Text area'yı devre dışı bırak
                 if hasattr(self, 'status_bar'):
                     self.status_bar.config(text="Çizim modu AÇIK - Araç seçin ve çizin")
             except Exception as e:
                 messagebox.showerror("Hata", f"Çizim modu açılamadı: {str(e)}")
-                self.drawing_mode = False
+                self.drawing_mode = False  # Geri al
         else:
+            # Çizim modu KAPALI
             try:
                 self.drawing_mode_btn.config(text="🎨 Çizim: KAPALI", bg=THEME["btn_bg"])
                 self.draw_toolbar.pack_forget()
                 self.drawing_canvas.toggle_drawing(False)
                 
+                # Çizim frame'ini gizle
                 self.drawing_frame.place_forget()
                 
-                self.text_area.config(state=tk.NORMAL)
+                self.text_area.config(state=tk.NORMAL)  # Text area'yı etkinleştir
                 if hasattr(self, 'status_bar'):
                     self.status_bar.config(text="Metin modu AÇIK - Yazı yazabilirsiniz")
             except Exception as e:
                 messagebox.showerror("Hata", f"Çizim modu kapatılamadı: {str(e)}")
     
     def change_draw_tool(self):
+        """Çizim aracını değiştir"""
         self.drawing_canvas.tool = self.draw_tool_var.get()
         tool_names = {
             "pen": "Kalem", "line": "Çizgi", "rectangle": "Dikdörtgen",
@@ -633,33 +653,42 @@ class NoteEditor(tk.Toplevel):
             self.status_bar.config(text=f"Araç: {tool_names.get(self.draw_tool_var.get())}")
     
     def choose_draw_color(self):
+        """Çizim rengi seç"""
         color = colorchooser.askcolor(title="Çizim Rengi Seç")
         if color[1]:
             self.draw_color_btn.config(bg=color[1])
             self.drawing_canvas.color = color[1]
     
     def change_draw_width(self):
+        """Çizim kalınlığını değiştir"""
         self.drawing_canvas.line_width = self.draw_width_var.get()
     
     def clear_all_drawings(self):
+        """Tüm çizimleri temizle"""
         if messagebox.askyesno("Temizle", "Tüm çizimleri silmek istediğinizden emin misiniz?"):
             self.drawing_canvas.clear_drawings()
             if hasattr(self, 'status_bar'):
                 self.status_bar.config(text="Çizimler temizlendi")
 
+    # === YAZI RENGİ ===
     def choose_text_color(self):
+        """Yazı rengi seç"""
         color = colorchooser.askcolor(title="Yazı Rengi Seç", initialcolor=self.text_color)
         if color[1]:
             self.text_color = color[1]
             self.text_color_btn.config(bg=color[1])
             
+            # Seçili metne renk uygula
             try:
                 self.text_area.tag_add("color", "sel.first", "sel.last")
                 self.text_area.tag_config("color", foreground=color[1])
             except tk.TclError:
+                # Seçim yoksa tüm metne uygula
                 self.text_area.config(fg=color[1])
 
+    # === GÖRSEL EKLEME ===
     def insert_image(self):
+        """Dosyadan görsel ekle"""
         filename = filedialog.askopenfilename(
             title="Görsel Seç",
             filetypes=[
@@ -672,38 +701,46 @@ class NoteEditor(tk.Toplevel):
         
         if filename:
             try:
+                # Görseli yükle ve yeniden boyutlandır
                 img = Image.open(filename)
+                
+                # Maksimum boyut
                 max_width = 400
                 max_height = 300
+                
+                # Oranı koru
                 img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+                
+                # Base64'e çevir
                 buffered = io.BytesIO()
                 img.save(buffered, format="PNG")
                 img_base64 = base64.b64encode(buffered.getvalue()).decode()
                 
+                # Label olarak ekle
                 photo = ImageTk.PhotoImage(img)
                 
                 label = tk.Label(self.text_area, image=photo, bg="white", 
                                relief=tk.FLAT, bd=0)
-                label.image = photo
+                label.image = photo  # Referansı tut
                 
-                img_index = len(self.images_data)
+                # Text alanına ekle
+                self.text_area.window_create(tk.INSERT, window=label, align=tk.CENTER)
+                self.text_area.insert(tk.INSERT, "\n")
+                
+                # Veriyi kaydet
                 self.images_data.append({
                     "base64": img_base64,
                     "width": img.width,
                     "height": img.height
                 })
                 
-                self.text_area.window_create(tk.INSERT, window=label, align=tk.CENTER)
-                self.text_area.insert(tk.INSERT, "\n")
-                
-                widget_path = str(label)
-                self.widget_to_obj[widget_path] = ('image', img_index)
-                
                 self.modified = True
                 self.update_status_lazy()
+                
             except Exception as e:
                 messagebox.showerror("Hata", f"Görsel yüklenemedi:\n{str(e)}")
 
+    # === TABLO ===
     def insert_table_dialog(self):
         rows = simpledialog.askinteger("Tablo", "Satır sayısı:", minvalue=1, maxvalue=20, initialvalue=3)
         cols = simpledialog.askinteger("Tablo", "Sütun sayısı:", minvalue=1, maxvalue=10, initialvalue=3)
@@ -712,10 +749,10 @@ class NoteEditor(tk.Toplevel):
             self.insert_table(rows, cols)
 
     def insert_table(self, rows, cols):
-        table_frame = tk.Frame(self.text_area, bg="#ccc", relief=tk.FLAT, bd=0)
+        table_frame = tk.Frame(self.text_area, bg="#ccc", bd=2, relief=tk.SOLID)
         
         cells = []
-        table_content = [['' for _ in range(cols)] for _ in range(rows)]
+        cell_widgets = []
         for r in range(rows):
             row_cells = []
             for c in range(cols):
@@ -723,26 +760,31 @@ class NoteEditor(tk.Toplevel):
                               font=("Calibri", 10), justify=tk.LEFT)
                 cell.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
                 row_cells.append(cell)
+                cell_widgets.append(cell)
             cells.append(row_cells)
         
-        table_index = len(self.tables_data)
-        self.tables_data.append(table_content)
+        table_id = len(self.tables_data)
+        self.tables_data.append({
+            "id": table_id,
+            "rows": rows,
+            "cols": cols,
+            "cells": cells,
+            "widgets": cell_widgets
+        })
         
         self.text_area.window_create(tk.INSERT, window=table_frame, align=tk.BASELINE)
         self.text_area.insert(tk.INSERT, "\n")
-        
-        widget_path = str(table_frame)
-        self.widget_to_obj[widget_path] = ('table', table_index)
-        
-        self.modified = True
 
+    # === ŞEKİL GALERİSİ (Word Benzeri) ===
     def open_shape_gallery(self):
+        """Word benzeri gelişmiş şekil galerisi"""
         try:
             gallery = tk.Toplevel(self)
             gallery.title("Şekil Galerisi")
             gallery.geometry("700x600")
             gallery.configure(bg=THEME["editor_bg"])
             
+            # Başlık
             header = tk.Frame(gallery, bg=THEME["menu_bg"], height=50)
             header.pack(fill=tk.X)
             header.pack_propagate(False)
@@ -751,6 +793,7 @@ class NoteEditor(tk.Toplevel):
                     bg=THEME["menu_bg"], fg="white",
                     font=("Calibri", 14, "bold")).pack(pady=12)
             
+            # Kategori seçimi
             cat_frame = tk.Frame(gallery, bg=THEME["toolbar_bg"])
             cat_frame.pack(fill=tk.X, padx=10, pady=5)
             
@@ -773,9 +816,11 @@ class NoteEditor(tk.Toplevel):
                               selectcolor=THEME["accent"], indicatoron=False,
                               command=lambda: update_shapes()).pack(side=tk.LEFT, padx=2)
             
+            # Şekiller container
             shapes_container = tk.Frame(gallery, bg=THEME["canvas_bg"])
             shapes_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
             
+            # Canvas ve scrollbar
             canvas = tk.Canvas(shapes_container, bg=THEME["canvas_bg"], highlightthickness=0)
             scrollbar = tk.Scrollbar(shapes_container, orient="vertical", command=canvas.yview)
             scrollable_frame = tk.Frame(canvas, bg=THEME["canvas_bg"])
@@ -791,6 +836,7 @@ class NoteEditor(tk.Toplevel):
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             
+            # Şekil tanımları
             shape_catalog = {
                 "basic": [
                     ("rect", "Dikdörtgen", 150, 100),
@@ -836,6 +882,7 @@ class NoteEditor(tk.Toplevel):
             }
             
             def update_shapes():
+                # Mevcut şekilleri temizle
                 for widget in scrollable_frame.winfo_children():
                     widget.destroy()
                 
@@ -845,26 +892,32 @@ class NoteEditor(tk.Toplevel):
                 row = 0
                 col = 0
                 for shape_id, shape_name, width, height in shapes:
+                    # Şekil frame
                     shape_frame = tk.Frame(scrollable_frame, bg="white",
                                           relief=tk.RAISED, bd=2, width=180, height=180)
                     shape_frame.grid(row=row, column=col, padx=10, pady=10)
                     shape_frame.grid_propagate(False)
                     
+                    # Önizleme canvas
                     preview = tk.Canvas(shape_frame, width=160, height=140,
                                        bg="white", highlightthickness=0)
                     preview.pack(pady=5)
                     
+                    # Şekli çiz (önizleme)
                     self._draw_shape_preview(preview, shape_id, 80, 70, 60, 50)
                     
+                    # İsim
                     tk.Label(shape_frame, text=shape_name, bg="white",
                             font=("Calibri", 9)).pack()
                     
+                    # Ekle butonu
                     btn = tk.Button(shape_frame, text="Ekle", bg=THEME["accent"],
                                   fg="white", cursor="hand2",
                                   command=lambda s=shape_id, n=shape_name, w=width, h=height: 
                                           self.insert_advanced_shape(s, n, w, h, gallery))
                     btn.pack(pady=3)
                     
+                    # Hover effect
                     def on_enter(e, f=shape_frame):
                         f.config(relief=tk.SOLID, bd=3)
                     def on_leave(e, f=shape_frame):
@@ -883,6 +936,7 @@ class NoteEditor(tk.Toplevel):
             messagebox.showerror("Hata", f"Şekil galerisi açılamadı: {str(e)}")
     
     def _draw_shape_preview(self, canvas, shape_type, cx, cy, w, h):
+        """Şekil önizlemesi çiz"""
         color = THEME["accent"]
         
         if shape_type == "rect":
@@ -904,6 +958,7 @@ class NoteEditor(tk.Toplevel):
             canvas.create_polygon(cx, cy-h//2, cx+w//2, cy, cx, cy+h//2, cx-w//2, cy,
                                 outline=color, fill="", width=2)
         elif shape_type == "arrow_right":
+            # Basit ok
             canvas.create_line(cx-w//2, cy, cx+w//2-15, cy, fill=color, width=3, arrow=tk.LAST, arrowshape=(16,20,8))
         elif shape_type == "arrow_left":
             canvas.create_line(cx+w//2, cy, cx-w//2+15, cy, fill=color, width=3, arrow=tk.LAST, arrowshape=(16,20,8))
@@ -912,6 +967,8 @@ class NoteEditor(tk.Toplevel):
         elif shape_type == "arrow_down":
             canvas.create_line(cx, cy-h//2, cx, cy+h//2-15, fill=color, width=3, arrow=tk.LAST, arrowshape=(16,20,8))
         elif shape_type == "star_5":
+            # 5 köşeli yıldız
+            import math
             points = []
             for i in range(10):
                 angle = math.pi / 2 + (2 * math.pi * i / 10)
@@ -921,6 +978,7 @@ class NoteEditor(tk.Toplevel):
                 points.extend([x, y])
             canvas.create_polygon(points, outline=color, fill="", width=2)
         elif shape_type == "pentagon":
+            import math
             points = []
             for i in range(5):
                 angle = math.pi / 2 + (2 * math.pi * i / 5)
@@ -929,6 +987,7 @@ class NoteEditor(tk.Toplevel):
                 points.extend([x, y])
             canvas.create_polygon(points, outline=color, fill="", width=2)
         elif shape_type == "hexagon":
+            import math
             points = []
             for i in range(6):
                 angle = 2 * math.pi * i / 6
@@ -937,19 +996,22 @@ class NoteEditor(tk.Toplevel):
                 points.extend([x, y])
             canvas.create_polygon(points, outline=color, fill="", width=2)
         else:
+            # Varsayılan: dikdörtgen
             canvas.create_rectangle(cx-w//2, cy-h//2, cx+w//2, cy+h//2,
                                    outline=color, width=2)
     
     def insert_advanced_shape(self, shape_type, shape_name, width, height, gallery_window):
+        """Gelişmiş şekil ekle"""
         shape_canvas = tk.Canvas(self.text_area, width=width, height=height,
                                 bg="white", relief=tk.FLAT, bd=0, highlightthickness=0)
         
         color = THEME["accent"]
         cx, cy = width // 2, height // 2
         
+        # Şekli çiz
         self._draw_shape_on_canvas(shape_canvas, shape_type, cx, cy, width-20, height-20, color)
         
-        shape_index = len(self.shapes_data)
+        # Şekil verisini kaydet
         self.shapes_data.append({
             "type": shape_type,
             "name": shape_name,
@@ -958,23 +1020,25 @@ class NoteEditor(tk.Toplevel):
             "color": color
         })
         
+        # Text area'ya ekle
         self.text_area.window_create(tk.INSERT, window=shape_canvas, align=tk.CENTER)
         self.text_area.insert(tk.INSERT, " ")
-        
-        widget_path = str(shape_canvas)
-        self.widget_to_obj[widget_path] = ('shape', shape_index)
         
         self.modified = True
         if hasattr(self, 'status_bar'):
             self.status_bar.config(text=f"'{shape_name}' eklendi")
         
+        # Galeriyi kapat
         try:
             gallery_window.destroy()
         except:
             pass
     
     def _draw_shape_on_canvas(self, canvas, shape_type, cx, cy, w, h, color):
+        """Canvas üzerine şekil çiz (gerçek boyut)"""
         try:
+            import math
+            
             if shape_type == "rect":
                 canvas.create_rectangle(10, 10, w+10, h+10, outline=color, width=2)
             elif shape_type == "square":
@@ -1035,7 +1099,10 @@ class NoteEditor(tk.Toplevel):
         except Exception as e:
             print(f"Şekil çizim hatası: {e}")
 
+    # === ESKİ ŞEKİL METODLARI (Geriye uyumluluk) ===
     def insert_shape(self, shape_type):
+        """Eski şekil ekleme (geriye uyumluluk için)"""
+        # Yeni galeriyi aç
         self.open_shape_gallery()
 
     def insert_text(self, text):
@@ -1051,6 +1118,7 @@ class NoteEditor(tk.Toplevel):
         except tk.TclError:
             self.text_area.tag_add(tag_name, "insert linestart", "insert lineend")
 
+    # === PDF EXPORT ===
     def export_to_pdf(self):
         if not PDF_AVAILABLE:
             messagebox.showerror("Hata", 
@@ -1086,6 +1154,7 @@ class NoteEditor(tk.Toplevel):
         styles = getSampleStyleSheet()
         story = []
         
+        # Başlık
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
@@ -1097,6 +1166,7 @@ class NoteEditor(tk.Toplevel):
         story.append(Paragraph(self.page_id, title_style))
         story.append(Spacer(1, 12))
         
+        # Metin içeriği
         content = self.text_area.get("1.0", tk.END).strip()
         if content:
             for para in content.split('\n'):
@@ -1112,35 +1182,56 @@ class NoteEditor(tk.Toplevel):
                 else:
                     story.append(Spacer(1, 6))
         
+        # Tablolar - Gelişmiş stil
         if self.tables_data:
             story.append(Spacer(1, 20))
             story.append(Paragraph("Tablolar", styles['Heading2']))
             story.append(Spacer(1, 12))
             
-            for table_content in self.tables_data:
+            for idx, table_data in enumerate(self.tables_data):
                 try:
-                    t = Table(table_content)
-                    t.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f3460')),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 11),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('TOPPADDING', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                        ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
-                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                        ('FONTSIZE', (0, 1), (-1, -1), 10),
-                        ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
-                        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
-                    ]))
-                    story.append(t)
-                    story.append(Spacer(1, 12))
+                    table_content = []
+                    cells = table_data.get("cells", [])
+                    
+                    for row in cells:
+                        row_data = []
+                        for cell in row:
+                            try:
+                                cell_text = cell.get() if hasattr(cell, 'get') else str(cell)
+                                row_data.append(cell_text if cell_text else " ")
+                            except:
+                                row_data.append(" ")
+                        if row_data:
+                            table_content.append(row_data)
+                    
+                    if table_content:
+                        t = Table(table_content)
+                        t.setStyle(TableStyle([
+                            # Başlık satırı
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f3460')),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, 0), 11),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                            ('TOPPADDING', (0, 0), (-1, 0), 12),
+                            # Veri satırları
+                            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                            ('FONTSIZE', (0, 1), (-1, -1), 10),
+                            ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
+                            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+                        ]))
+                        story.append(t)
+                        story.append(Spacer(1, 12))
                 except Exception as e:
                     print(f"Tablo PDF ekleme hatası: {e}")
+                    import traceback
+                    traceback.print_exc()
         
+        # Şekiller - Vector olarak çiz
         if self.shapes_data:
             story.append(Spacer(1, 20))
             story.append(Paragraph("Şekiller ve Diyagramlar", styles['Heading2']))
@@ -1149,28 +1240,43 @@ class NoteEditor(tk.Toplevel):
             for shape_data in self.shapes_data:
                 try:
                     shape_type = shape_data.get("type", "rect")
-                    shape_names = {
-                        "rect": "▭ Dikdörtgen",
-                        "oval": "⭕ Oval/Daire",
-                        "star": "⭐ Yıldız",
-                        "arrow_right": "➡ Sağ Ok",
-                        "arrow_left": "⬅ Sol Ok",
-                        "arrow_up": "⬆ Yukarı Ok",
-                        "arrow_down": "⬇ Aşağı Ok",
-                        "triangle": "▲ Üçgen",
-                        "diamond": "◆ Baklava",
-                        "pentagon": "⬠ Beşgen",
-                        "hexagon": "⬡ Altıgen",
-                        "circle": "● Daire",
-                        "square": "■ Kare"
-                    }
+                    w = shape_data.get("width", 150)
+                    h = shape_data.get("height", 100)
+                    color = colors.HexColor(shape_data.get("color", "#0078d7"))
                     
-                    shape_text = shape_names.get(shape_type, "• Şekil")
-                    story.append(Paragraph(shape_text, styles['Normal']))
+                    # Drawing oluştur (boyut points olarak, pixel ≈ point varsay)
+                    d = Drawing(w, h)
+                    
+                    cx = w / 2
+                    cy = h / 2
+                    
+                    if shape_type == "rect":
+                        d.add(Rect(10, 10, w - 20, h - 20, strokeColor=color, strokeWidth=2, fillColor=None))
+                    elif shape_type == "square":
+                        size = min(w, h) - 20
+                        d.add(Rect(10, 10, size, size, strokeColor=color, strokeWidth=2, fillColor=None))
+                    elif shape_type == "oval":
+                        d.add(Ellipse(cx, cy, (w - 20)/2, (h - 20)/2, strokeColor=color, strokeWidth=2, fillColor=None))
+                    elif shape_type == "circle":
+                        size = min(w, h) - 20
+                        d.add(Ellipse(cx, cy, size/2, size/2, strokeColor=color, strokeWidth=2, fillColor=None))
+                    elif shape_type == "triangle":
+                        points = [cx, 10, 10, h-10, w-10, h-10]
+                        d.add(Polygon(points, strokeColor=color, strokeWidth=2, fillColor=None))
+                    elif shape_type == "diamond":
+                        points = [cx, 10, w-10, cy, cx, h-10, 10, cy]
+                        d.add(Polygon(points, strokeColor=color, strokeWidth=2, fillColor=None))
+                    elif shape_type == "arrow_right":
+                        d.add(Line(10, cy, w-10, cy, strokeColor=color, strokeWidth=4))
+                        # Arrowhead ekle, simple için
+                    # Diğer şekiller için benzer şekilde ekle
+                    
+                    story.append(d)
                     story.append(Spacer(1, 6))
                 except Exception as e:
                     print(f"Şekil PDF ekleme hatası: {e}")
         
+        # Görseller
         if self.images_data:
             story.append(Spacer(1, 20))
             story.append(Paragraph("Görseller", styles['Heading2']))
@@ -1213,11 +1319,14 @@ class NoteEditor(tk.Toplevel):
             self.text_area.edit_modified(False)
 
     def on_key_release(self, event=None):
+        """Tuş bırakıldığında - Debounced"""
         if self._after_id:
             self.after_cancel(self._after_id)
+        # 500ms bekle, ardından güncelle (performans için)
         self._after_id = self.after(500, self.update_status_lazy)
 
     def update_status_lazy(self):
+        """Durum çubuğunu güncelle - Optimize edilmiş"""
         if not hasattr(self, 'status_bar'):
             return
         
@@ -1241,44 +1350,67 @@ class NoteEditor(tk.Toplevel):
             print(f"Durum güncelleme hatası: {e}")
 
     def save_note(self):
+        """Notu kaydet - Optimize edilmiş ve güvenli"""
         try:
             if self.callback:
-                dump = self.text_area.dump("1.0", tk.END)
-                
-                serial_dump = []
-                for key, val, idx in dump:
-                    if key == 'window':
-                        widget_path = val
-                        if widget_path in self.widget_to_obj:
-                            obj_type, obj_id = self.widget_to_obj[widget_path]
-                            serial_dump.append(['window', f"{obj_type}:{obj_id}", idx])
-                    else:
-                        serial_dump.append([key, val, idx])
-                
+                # Tablo içerikleri - Güvenli
                 table_contents = []
-                for table in self.tables_data:
-                    if isinstance(table, list):
-                        table_contents.append(table)
-                    else:
+                try:
+                    for table_data in self.tables_data:
                         table_content = []
-                        cells = table.get("cells", [])
+                        cells = table_data.get("cells", [])
                         for row in cells:
-                            row_data = [cell.get() if hasattr(cell, 'get') else "" for cell in row]
-                            table_content.append(row_data)
-                        table_contents.append(table_content)
+                            row_data = []
+                            for cell in row:
+                                try:
+                                    cell_value = cell.get() if hasattr(cell, 'get') else str(cell)
+                                    row_data.append(cell_value)
+                                except:
+                                    row_data.append("")
+                            if row_data:
+                                table_content.append(row_data)
+                        if table_content:
+                            table_contents.append(table_content)
+                except Exception as e:
+                    print(f"Tablo kaydetme hatası: {e}")
+                    table_contents = []
                 
-                shapes_safe = [s for s in self.shapes_data]
+                # Şekil verileri - JSON serializable yap
+                shapes_safe = []
+                try:
+                    for shape in self.shapes_data:
+                        shape_safe = {
+                            "type": str(shape.get("type", "rect")),
+                            "name": str(shape.get("name", "Şekil")),
+                            "width": int(shape.get("width", 150)),
+                            "height": int(shape.get("height", 100)),
+                            "color": str(shape.get("color", "#0078d7"))
+                        }
+                        shapes_safe.append(shape_safe)
+                except Exception as e:
+                    print(f"Şekil kaydetme hatası: {e}")
+                    shapes_safe = []
                 
-                images_safe = [i for i in self.images_data]
+                # Görsel verileri - Güvenli
+                images_safe = []
+                try:
+                    for img in self.images_data:
+                        img_safe = {
+                            "base64": str(img.get("base64", "")),
+                            "width": int(img.get("width", 100)),
+                            "height": int(img.get("height", 100))
+                        }
+                        images_safe.append(img_safe)
+                except Exception as e:
+                    print(f"Görsel kaydetme hatası: {e}")
+                    images_safe = []
                 
-                drawings = self.drawing_canvas.serialize_drawings()
-                
+                # Kaydet
                 save_data = {
-                    "dump": serial_dump,
+                    "text": self.text_area.get("1.0", tk.END),
                     "tables": table_contents,
                     "shapes": shapes_safe,
-                    "images": images_safe,
-                    "drawings": drawings
+                    "images": images_safe
                 }
                 
                 self.callback(self.page_id, save_data)
@@ -1286,15 +1418,15 @@ class NoteEditor(tk.Toplevel):
             self.modified = False
             if hasattr(self, 'status_bar'):
                 self.status_bar.config(text="Kaydedildi ✓")
-                self.after(2000, self.update_status_lazy)
+                self.after(2000, lambda: self.update_status_lazy())
                 
         except Exception as e:
-            messagebox.showerror("Kaydetme Hatası", 
-                               f"Not kaydedilirken hata oluştu:\n{str(e)}\n\n"
-                               "Lütfen konsol çıktısını kontrol edin.")
             print(f"Kaydetme hatası detayı: {e}")
             import traceback
             traceback.print_exc()
+            messagebox.showerror("Kaydetme Hatası", 
+                               f"Not kaydedilirken hata oluştu:\n{str(e)}\n\n"
+                               "Lütfen konsol çıktısını kontrol edin.")
 
     def close_editor(self):
         if self.modified:
@@ -1307,7 +1439,10 @@ class NoteEditor(tk.Toplevel):
         else:
             self.destroy()
 
+# === ANA UYGULAMA ===
+
 class ModernGridApp:
+    """Ana Uygulama"""
     def __init__(self, root):
         self.root = root
         self.root.title("Grid Not Sistemi - Direkt Çizim ve Yazı Rengi")
@@ -1321,6 +1456,7 @@ class ModernGridApp:
         self.setup_ui()
         
     def setup_ui(self):
+        # Menü çubuğu
         menubar = tk.Frame(self.root, bg=THEME["menu_bg"], height=50)
         menubar.pack(side=tk.TOP, fill=tk.X)
         menubar.pack_propagate(False)
@@ -1335,10 +1471,12 @@ class ModernGridApp:
                                    font=("Calibri", 10, "bold"))
         self.page_label.pack(side=tk.RIGHT, padx=20)
         
+        # PDF durum
         if PDF_AVAILABLE:
             tk.Label(menubar, text="✓ Tüm Özellikler", bg=THEME["menu_bg"], 
                     fg="#00ff00", font=("Calibri", 9)).pack(side=tk.RIGHT, padx=10)
         
+        # Canvas
         container = tk.Frame(self.root, bg=THEME["canvas_bg"])
         container.pack(fill=tk.BOTH, expand=True)
         
@@ -1379,6 +1517,7 @@ class ModernGridApp:
                               font=("Calibri", 14), fill="#666")
 
     def create_new_page(self):
+        """Yeni sayfa oluştur"""
         self.current_page_id += 1
         pid = f"Sayfa_{self.current_page_id}"
         self.pages[pid] = {
@@ -1395,6 +1534,7 @@ class ModernGridApp:
         self.update_page_count()
 
     def redraw_pages(self):
+        """Sayfaları yeniden çiz - Optimize edilmiş"""
         self.canvas.delete("all")
         
         if not self.pages:
@@ -1410,17 +1550,21 @@ class ModernGridApp:
                 x = 50 + c * (PAGE_CONFIG["width"] + PAGE_CONFIG["margin"])
                 y = 50 + r * (PAGE_CONFIG["height"] + PAGE_CONFIG["margin"])
                 
+                # Gölge
                 self.canvas.create_rectangle(x+3, y+3, x+213, y+300, 
                                             fill="#333", outline="", tags=pid)
                 
+                # Kart
                 self.canvas.create_rectangle(x, y, x+210, y+297, 
                                             fill="white", outline="#ccc", width=2,
                                             tags=(pid, "page"))
                 
+                # Başlık
                 title = data.get("title", pid)
                 self.canvas.create_text(x+105, y+20, text=f"📝 {title}", 
                                       font=("Calibri", 11, "bold"), tags=pid)
                 
+                # Önizleme
                 try:
                     content_data = data.get("content", "")
                     preview_text = ""
@@ -1445,6 +1589,7 @@ class ModernGridApp:
                 except Exception as e:
                     print(f"Önizleme hatası: {e}")
                 
+                # İkonlar
                 try:
                     icon_x = x + 15
                     if isinstance(content_data, dict):
@@ -1462,11 +1607,13 @@ class ModernGridApp:
                 except:
                     pass
                 
-                self.canvas.create_text(x+195, y+280, text="❌",
+                # Sil butonu
+                delete_btn = self.canvas.create_text(x+195, y+280, text="❌",
                                                     font=("Arial", 12),
                                                     tags=(f"delete_{pid}", "delete"),
                                                     state=tk.HIDDEN)
                 
+                # Events
                 self.canvas.tag_bind(pid, "<Button-1>", lambda e, p=pid: self.open_editor(p))
                 self.canvas.tag_bind(pid, "<Enter>", lambda e, p=pid: self.on_hover(p, True))
                 self.canvas.tag_bind(pid, "<Leave>", lambda e, p=pid: self.on_hover(p, False))
@@ -1494,9 +1641,7 @@ class ModernGridApp:
             print(f"Hover hatası: {e}")
 
     def open_editor(self, pid):
-        if pid not in self.pages:
-            return
-        
+        """Not editörünü aç"""
         if pid in self.open_editors:
             try:
                 self.open_editors[pid].lift()
@@ -1515,6 +1660,7 @@ class ModernGridApp:
         editor.protocol("WM_DELETE_WINDOW", lambda: (on_close(), editor.close_editor()))
 
     def save_callback(self, pid, content):
+        """Not kaydetme callback"""
         if pid in self.pages:
             self.pages[pid]["content"] = content
             self.redraw_pages()
@@ -1549,7 +1695,7 @@ class ModernGridApp:
                     json.dump({
                         "pages": self.pages,
                         "current_page_id": self.current_page_id
-                    }, f, ensure_ascii=False, indent=2)
+                    }, f, indent=2, ensure_ascii=False)
                 messagebox.showinfo("Başarılı", "Proje kaydedildi!")
             except Exception as e:
                 messagebox.showerror("Hata", f"Kaydetme hatası:\n{str(e)}")
