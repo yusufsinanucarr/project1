@@ -1155,6 +1155,7 @@ class NoteEditor(tk.Toplevel):
     # PDF DIŞA AKTARMA (ReportLab Kütüphanesi ile)
     # =========================================================================
     def export_to_pdf(self):
+        """PDF'e aktar - Çizimlerle birlikte"""
         if not PDF_AVAILABLE:
             messagebox.showerror("Hata", 
                                "PDF özelliği için 'reportlab' ve 'Pillow' gerekli!\n\n"
@@ -1172,7 +1173,15 @@ class NoteEditor(tk.Toplevel):
             return
         
         try:
-            self._create_pdf(filename)
+            # Çizim canvas'ını yakala
+            drawing_image = None
+            if hasattr(self, 'drawing_canvas'):
+                try:
+                    drawing_image = self._capture_drawing_canvas()
+                except Exception as e:
+                    print(f"Çizim yakalama hatası: {e}")
+            
+            self._create_pdf(filename, drawing_image)
             messagebox.showinfo("Başarılı", f"PDF oluşturuldu:\n{filename}")
             if hasattr(self, 'status_bar'):
                 self.status_bar.config(text="PDF kaydedildi ✓")
@@ -1181,7 +1190,77 @@ class NoteEditor(tk.Toplevel):
             import traceback
             traceback.print_exc()
 
-    def _create_pdf(self, filename):
+    def _capture_drawing_canvas(self):
+        """Çizim canvas'ını PIL Image olarak yakala"""
+        try:
+            items = self.drawing_canvas.find_withtag("drawing")
+            if not items:
+                return None
+            
+            canvas_width = self.drawing_canvas.winfo_width()
+            canvas_height = self.drawing_canvas.winfo_height()
+            
+            if canvas_width <= 1 or canvas_height <= 1:
+                return None
+            
+            from PIL import Image, ImageDraw, ImageFont
+            image = Image.new('RGB', (canvas_width, canvas_height), 'white')
+            draw = ImageDraw.Draw(image)
+            
+            for item in items:
+                item_type = self.drawing_canvas.type(item)
+                coords = self.drawing_canvas.coords(item)
+                
+                try:
+                    if item_type == "line":
+                        color = self.drawing_canvas.itemcget(item, "fill")
+                        width = int(float(self.drawing_canvas.itemcget(item, "width")))
+                        if len(coords) >= 4:
+                            for i in range(0, len(coords)-2, 2):
+                                draw.line([coords[i], coords[i+1], coords[i+2], coords[i+3]],
+                                        fill=color, width=width)
+                    
+                    elif item_type == "rectangle":
+                        color = self.drawing_canvas.itemcget(item, "outline")
+                        width = int(float(self.drawing_canvas.itemcget(item, "width")))
+                        if len(coords) >= 4:
+                            draw.rectangle(coords, outline=color, width=width)
+                    
+                    elif item_type == "oval":
+                        color = self.drawing_canvas.itemcget(item, "outline")
+                        width = int(float(self.drawing_canvas.itemcget(item, "width")))
+                        if len(coords) >= 4:
+                            draw.ellipse(coords, outline=color, width=width)
+                    
+                    elif item_type == "polygon":
+                        color = self.drawing_canvas.itemcget(item, "outline")
+                        if len(coords) >= 6:
+                            draw.polygon(coords, outline=color)
+                    
+                    elif item_type == "text":
+                        text = self.drawing_canvas.itemcget(item, "text")
+                        color = self.drawing_canvas.itemcget(item, "fill")
+                        if len(coords) >= 2:
+                            try:
+                                fnt = ImageFont.truetype("arial.ttf", 14)
+                            except:
+                                fnt = ImageFont.load_default()
+                            draw.text((coords[0], coords[1]), text, fill=color, font=fnt)
+                
+                except Exception as e:
+                    print(f"Öğe çizim hatası ({item_type}): {e}")
+                    continue
+            
+            return image
+            
+        except Exception as e:
+            print(f"Canvas yakalama hatası: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+
+    def _create_pdf(self, filename, drawing_image=None):
         doc = SimpleDocTemplate(filename, pagesize=A4,
                                rightMargin=72, leftMargin=72,
                                topMargin=72, bottomMargin=72)
@@ -1326,6 +1405,37 @@ class NoteEditor(tk.Toplevel):
                     story.append(Spacer(1, 12))
                 except Exception as e:
                     print(f"Görsel PDF'e eklenemedi: {e}")
+        
+        
+        # ÇİZİMLER - YENİ BÖLÜM!
+        if drawing_image is not None:
+            story.append(Spacer(1, 20))
+            story.append(Paragraph("Çizimler", styles['Heading2']))
+            story.append(Spacer(1, 12))
+            
+            try:
+                img_buffer = io.BytesIO()
+                drawing_image.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+                
+                page_width = A4[0] - 144
+                page_height = A4[1] - 144
+                
+                img_width = drawing_image.width
+                img_height = drawing_image.height
+                
+                scale = min(page_width / img_width, page_height / img_height, 1.0)
+                new_width = img_width * scale
+                new_height = img_height * scale
+                
+                rl_img = RLImage(img_buffer, width=new_width, height=new_height)
+                story.append(rl_img)
+                story.append(Spacer(1, 12))
+                
+            except Exception as e:
+                print(f"Çizim PDF'e eklenemedi: {e}")
+                import traceback
+                traceback.print_exc()
         
         doc.build(story)
 
